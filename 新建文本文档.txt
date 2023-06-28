@@ -1,0 +1,169 @@
+b_notifications = {}
+b_notifications.new = function ()
+    local self = {}
+
+    local active_notifs = {}
+    self.notif_padding = 0.005 --长度往上
+    self.notif_text_size = 0.5 --文本大小
+    self.notif_title_size = 0.6 --题头大小
+    self.notif_spacing = 0.015 --间隔
+    self.notif_width = 0.15 --宽度
+    self.notif_flash_duration = 1 --闪光持续时间
+    self.notif_anim_speed = 1 --动画速度
+    self.notif_banner_colour = {r = 104, g = 204, b = 255, a = 1}
+    self.notif_flash_colour = {r = 0, g = 100, b = 100, a = 1}
+    self.max_notifs = 10
+    self.notif_banner_height = 0.002 --长度往下
+    self.use_toast = false
+    local split = function (input, sep)
+        local t={}
+        for str in string.gmatch(input, "([^"..sep.."]+)") do
+                table.insert(t, str)
+        end
+        return t
+    end
+    
+    local function lerp(a, b, t)
+        return a + (b - a) * t
+    end
+    local cut_string_to_length = function(input, length, fontSize)
+        input = split(input, " ")
+        local output = {}
+        local line = ""
+        for i, word in ipairs(input) do
+            if directx.get_text_size(line..word, fontSize) >= length then
+                if directx.get_text_size(word, fontSize) > length then
+                    while directx.get_text_size(word , fontSize) > length do
+                        local word_lenght = string.len(word)
+                        for x = 1, word_lenght, 1 do
+                            if directx.get_text_size(line..string.sub(word ,1, x), fontSize) > length then
+                                output[#output+1] = line..string.sub(word, 1, x - 1)
+                                line = ""
+                                word = string.sub(word, x, word_lenght)
+                                break
+                            end
+                        end
+                    end
+                else
+                    output[#output+1] =  line
+                    line = ""
+                end
+            end
+            if i == #input then
+                output[#output+1] = line..word
+            end
+            line = line..word.." "
+        end
+        return table.concat(output, "\n")
+    end
+
+    local draw_notifs = function ()
+        local aspect_16_9 = 1.777777777777778
+        util.create_tick_handler(function ()
+            local total_height = 0
+            local delta_time = MISC.GET_FRAME_TIME()
+            for i = #active_notifs, 1, -1 do
+                local notif = active_notifs[i]
+                local notif_body_colour = notif.colour
+                if notif.flashtimer > 0 then
+                    notif_body_colour = self.notif_flash_colour
+                    notif.flashtimer = notif.flashtimer - delta_time
+                end
+                if notif.current_y_pos == -10 then
+                    notif.current_y_pos = total_height
+                end
+                notif.current_y_pos = lerp(notif.current_y_pos, total_height, 5 * delta_time * self.notif_anim_speed)
+                if not notif.marked_for_deletetion then
+                    notif.animation_state = lerp(notif.animation_state, 1, 10 * delta_time * self.notif_anim_speed)
+                end
+                    directx.draw_rect(
+                        1 - self.notif_width - self.notif_padding * 2,
+                        0.1 - self.notif_padding * 2 * aspect_16_9 + notif.current_y_pos,
+                        self.notif_width + (self.notif_padding * 2),
+                        (notif.text_height + notif.title_height + self.notif_padding * 2 * aspect_16_9) * notif.animation_state,
+                        notif_body_colour
+                    )
+                    directx.draw_rect(
+                        1 - self.notif_width - self.notif_padding * 2,
+                        0.1 - self.notif_padding * 2 * aspect_16_9 + notif.current_y_pos,
+                        self.notif_width + (self.notif_padding * 2),
+                        self.notif_banner_height * aspect_16_9 * notif.animation_state,
+                        self.notif_banner_colour
+                    )
+                    directx.draw_text(
+                        1 - self.notif_padding - self.notif_width,
+                        0.1 - self.notif_padding * aspect_16_9 + notif.current_y_pos,
+                        notif.title,
+                        ALIGN_TOP_LEFT,
+                        self.notif_title_size,
+                        {r = 1 * notif.animation_state, g = 1 * notif.animation_state, b = 1 * notif.animation_state, a = 1 * notif.animation_state}
+                    )
+                    directx.draw_text(
+                        1 - self.notif_padding - self.notif_width,
+                        0.1 - self.notif_padding * aspect_16_9 + notif.current_y_pos + notif.title_height,
+                        notif.text,
+                        ALIGN_TOP_LEFT,
+                        self.notif_text_size,
+                        {r = 1 * notif.animation_state, g = 1 * notif.animation_state, b = 1 * notif.animation_state, a = 1 * notif.animation_state}
+                    )
+                total_height = total_height + ((notif.total_height + self.notif_padding * 2 + self.notif_spacing) * notif.animation_state)
+                if notif.marked_for_deletetion then
+                    notif.animation_state = lerp(notif.animation_state, 0, 10 * delta_time)
+                    if notif.animation_state < 0.05 then
+                        table.remove(active_notifs, i)
+                    end
+                elseif notif.duration < 0 then
+                    notif.marked_for_deletetion = true
+                end
+                notif.duration = notif.duration - delta_time
+            end
+            return #active_notifs > 0
+        end)
+    end
+
+    self.notify = function (title,text, duration, colour)
+        if self.use_toast then
+            util.toast(title.."\n"..text)
+            return
+        end
+        title = cut_string_to_length(title, self.notif_width, self.notif_title_size)
+        text = cut_string_to_length(text, self.notif_width, self.notif_text_size)
+        local x, text_heigth = directx.get_text_size(text, self.notif_text_size)
+        local xx, title_height = directx.get_text_size(title, self.notif_title_size)
+        local hash = util.joaat(title..text)
+        local new_notification = {
+            title = title,
+            flashtimer = self.notif_flash_duration,
+            colour = colour or {r = 104, g = 204, b = 255, a = 1},
+            duration = duration or 3,
+            current_y_pos = -10,
+            marked_for_deletetion = false,
+            animation_state = 0,
+            text = text,
+            hash = hash,
+            text_height = text_heigth,
+            title_height = title_height,
+            total_height = title_height + text_heigth
+        }
+        for i, notif in ipairs(active_notifs) do
+            if notif.hash == hash then
+                notif.flashtimer = self.notif_flash_duration * 0.5
+                notif.marked_for_deletetion = false
+                notif.duration = duration or 3
+                return
+            end
+        end
+        active_notifs[#active_notifs+1] = new_notification
+        if #active_notifs > self.max_notifs then
+            table.remove(active_notifs, 1)
+        end
+        if #active_notifs == 1 then draw_notifs() end
+    end
+
+    return self
+end
+
+local mayonotification = b_notifications.new()
+function notification(input)
+    mayonotification.notify("萝卜测试",input)
+end
